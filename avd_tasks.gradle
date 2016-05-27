@@ -1,0 +1,65 @@
+final String avdName = "mobium_testing"
+final String systemImage = "sys-img-x86_64-android-23"
+final String abi = "default/x86_68"
+final String target = "android-23"
+
+
+List<String> bash_output(cmd) {
+    cmd = cmd as String
+    ProcessBuilder pb = new ProcessBuilder("sh", "-c", cmd);
+    Process shell = pb.start();
+    shell.getOutputStream().close();
+    InputStream shellIn = shell.getInputStream();
+    InputStream errorStream = shell.getErrorStream();
+
+
+    // wait for the shell to finish and get the return code
+    def result = org.codehaus.groovy.runtime.IOGroovyMethods.getText(shellIn)
+    def out = org.codehaus.groovy.runtime.IOGroovyMethods.getText(errorStream)
+    try {
+        shellIn.close();
+        errorStream.close()
+        shell = null;
+    } catch (IOException ignoreMe) {}
+
+    return [result, out]
+}
+
+
+
+task checkTargetForExist << {
+    println("finding for target ${target}...")
+    def output = bash_output("android list targets")[0]
+    if (output.contains(target)) {
+        println("target found")
+    } else {
+        println("target does not exists, downloading")
+        def errorStr = bash_output("echo \"y\" | android -v update sdk -a  --no-ui --filter ${target}")[1]
+        if (errorStr != null)
+            throw new IllegalStateException("loading failed" + errorStr)
+    }
+}
+
+task checkSystemImageForExists(dependsOn: "checkTargetForExist") << {
+    println("finding for abi ${abi} in target ${target}...")
+    def output = bash_output("android list targets")[0]
+
+    String header = "Available Android targets:"
+
+    def targetOutPut =
+            (output.substring(output.indexOf(header) + header.length())
+            .split("----------\nid:"))
+            .find({ item ->
+                    item.indexOf(target) > 0
+            })
+
+    if (targetOutPut != null) {
+        if (targetOutPut.contains(abi)) {
+            println("abi found")
+        } else {
+            println("abi not found, downloading ...")
+            def errorStr = bash_output("echo \"y\" | android update sdk -a --no-ui --filter ${systemImage}")[1]
+                throw new IllegalStateException("loading failed" + errorStr)
+        }
+    }
+}
