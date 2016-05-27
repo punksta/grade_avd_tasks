@@ -1,9 +1,11 @@
-final String avdName = "mobium_testing"
+//config of tasks
+
+final String avdName = "testing_ui"
 final String systemImage = "sys-img-x86_64-android-23"
-final String abi = "default/x86_68"
-final String target = "android-23"
+final String abi = "google_apis/x86"
+final String target = "\"Google Inc.:Google APIs:23\""
 
-
+//get input and error stream from cmd command
 List<String> bash_output(cmd) {
     cmd = cmd as String
     ProcessBuilder pb = new ProcessBuilder("sh", "-c", cmd);
@@ -12,10 +14,9 @@ List<String> bash_output(cmd) {
     InputStream shellIn = shell.getInputStream();
     InputStream errorStream = shell.getErrorStream();
 
-
-    // wait for the shell to finish and get the return code
-    def result = org.codehaus.groovy.runtime.IOGroovyMethods.getText(shellIn)
-    def out = org.codehaus.groovy.runtime.IOGroovyMethods.getText(errorStream)
+    def result = IOGroovyMethods.getText(shellIn)
+    def out = IOGroovyMethods.getText(errorStream)
+    
     try {
         shellIn.close();
         errorStream.close()
@@ -26,7 +27,7 @@ List<String> bash_output(cmd) {
 }
 
 
-
+//downloads target if it not exist
 task checkTargetForExist << {
     println("finding for target ${target}...")
     def output = bash_output("android list targets")[0]
@@ -35,20 +36,21 @@ task checkTargetForExist << {
     } else {
         println("target does not exists, downloading")
         def errorStr = bash_output("echo \"y\" | android -v update sdk -a  --no-ui --filter ${target}")[1]
-        if (errorStr != null)
+        if (errorStr != null && errorStr.length() > 0)
             throw new IllegalStateException("loading failed" + errorStr)
     }
 }
 
-task checkSystemImageForExists(dependsOn: "checkTargetForExist") << {
+//downloads system image if not exists
+task checkSystemImageForExists << {
     println("finding for abi ${abi} in target ${target}...")
     def output = bash_output("android list targets")[0]
 
     String header = "Available Android targets:"
 
     def targetOutPut =
-            (output.substring(output.indexOf(header) + header.length())
-            .split("----------\nid:"))
+            output.substring(output.indexOf(header) + header.length())
+            .split("----------\nid:")
             .find({ item ->
                     item.indexOf(target) > 0
             })
@@ -59,7 +61,81 @@ task checkSystemImageForExists(dependsOn: "checkTargetForExist") << {
         } else {
             println("abi not found, downloading ...")
             def errorStr = bash_output("echo \"y\" | android update sdk -a --no-ui --filter ${systemImage}")[1]
+            if (errorStr != null && errorStr.length() > 0)
                 throw new IllegalStateException("loading failed" + errorStr)
         }
     }
 }
+
+
+//creates avd if not exits
+task checkAvdForExists << {
+    println("finding for avd ${avdName}")
+    def output = bash_output("android list avd")[0]
+
+    def targetAvd = output
+            .split("Name:")
+            .find({it.contains(avdName)})
+
+    if (targetAvd != null) {
+        println("abd found")
+        println("cheching targets and abi ...")
+    } else {
+        println("abd not found, creating")
+        create_adb(avdName, abi, target);
+    }
+}
+
+//starting avd of specific name if it did not started yet
+task startAvdIfNotRun << {
+
+    def port = 5554
+    def millisecWait = 10
+
+
+    String deviceName = "emulator-${port}"
+    println("looking for " + deviceName +"...")
+
+    if (isDeviseRunning(deviceName)) {
+        println("device allready started")
+    } else {
+        println("device not started, starting avd ${avdName} at port ${port}")
+        startAvdAndWait(avdName, port, millisecWait)
+    }
+}
+
+//try to find device in adb devices outout
+def isDeviseRunning(deviceName) {
+    def devices = bash_output("\$ANDROID_HOME/platform-tools/adb devices")
+    def result = false
+    devices.each {d ->
+        if (d.toString().contains (deviceName))
+            result =  true
+    }
+    return result
+}
+
+//start avd of name on port in another process
+def startAvdAndWait(avdName, port, millisecWait) {
+    ["sh", "-c", "emulator -avd ${avdName} -port ${port}", "&"].execute()
+    sleep(millisecWait)
+}
+
+//create adb
+def create_adb(
+        avdName,
+        abi = "default/x86_64",
+        target = "android-23",
+        device = "\"Nexus 6\"",
+        sd_size = "1024M",
+        skin = "1080x1920"
+) {
+    bash_output("echo \"n\" | android create avd -n ${avdName} -t ${target} --abi ${abi} -d ${device} -c ${sd_size} -s ${skin}").each { println it }
+}
+
+
+//to create avd we need system image and target sdk
+checkAvdForExists.dependsOn(checkSystemImageForExists, checkTargetForExist)
+
+//to start avd we need to create avd
+startAvdIfNotRun.dependsOn(checkAvdForExists)
